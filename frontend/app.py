@@ -53,6 +53,79 @@ if "pending_message" not in st.session_state:
 if "error_message" not in st.session_state:
     st.session_state.error_message = None
 
+# Persistent WebSocket connection
+if "websocket" not in st.session_state:
+    st.session_state.websocket = None
+
+if "is_websocket_connected" not in st.session_state:
+    st.session_state.is_websocket_connected = False
+
+# ==================================================
+# WEBSOCKET CONNECTION MANAGER
+# ==================================================
+
+def connect_websocket():
+
+    # Reuse existing connection
+    websocket = st.session_state.websocket
+
+    if websocket is not None:
+
+        try:
+            # Check whether the connection is still alive
+            websocket.ping().wait(timeout=2)
+
+            st.session_state.is_websocket_connected = True
+            return True
+
+        except Exception:
+
+            logger.warning("Existing WebSocket connection lost.")
+
+            try:
+                websocket.close()
+            except Exception:
+                pass
+
+            st.session_state.websocket = None
+            st.session_state.is_websocket_connected = False
+
+    # Establish a new connection
+    try:
+
+        logger.info("Connecting to chatbot WebSocket...")
+
+        websocket = connect(
+            WEBSOCKET_URL,
+            open_timeout=15,
+            close_timeout=5,
+            max_size=10 * 1024 * 1024,
+        )
+
+        st.session_state.websocket = websocket
+        st.session_state.is_websocket_connected = True
+
+        logger.info("WebSocket connected successfully.")
+
+        return True
+
+    except Exception:
+
+        logger.exception("WebSocket connection failed.")
+
+        st.session_state.websocket = None
+        st.session_state.is_websocket_connected = False
+
+        return False
+
+
+# ==================================================
+# INITIALIZE WEBSOCKET CONNECTION
+# ==================================================
+
+if not st.session_state.is_websocket_connected:
+
+    connect_websocket()
 
 # ==================================================
 # BLACK & GOLD THEME
@@ -336,16 +409,11 @@ with center:
 st.markdown(
             """
             <div class="welcome-message">
-                <h3>Welcome to DarGlobal !!! </h3>
+                <h4>Welcome to DarGlobal !!! </h4>
                 <p>
-                    DarGlobal is a premier international luxury real estate investment
-                    and development platform specialising in architecturally distinctive,
-                    design-led residences in the world's most sought-after destinations.
-                </p>
-                <p>
-                    Listed on the London Stock Exchange, we connect global capital with
-                    curated luxury living and property investment opportunities across
-                    the UAE, Saudi Arabia, Qatar, Spain, and beyond.
+                    DarGlobal is a premier international luxury real estate investment and development platform.
+                    We connect global capital with curated luxury living and 
+                    property investment opportunities across the UAE, Saudi Arabia, Qatar, Spain, and beyond.
                 </p>
                 <p><strong>How can I assist you today?</strong></p>
             </div>
@@ -358,15 +426,36 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ==================================================
+# WEBSOCKET CONNECTION STATUS
+# ==================================================
 
+if st.session_state.is_websocket_connected:
+
+    st.success(
+        "Connected to server."
+    )
+
+else:
+
+    st.error(
+        "Disconnected from chatbot server."
+    )
+
+    if st.button("Reconnect"):
+
+        connect_websocket()
+
+        st.rerun()
+        
 # ==================================================
 # WEBSOCKET STREAMING
 # ==================================================
 
 def stream_response(message: str, history: list):
     """
-    Connect to FastAPI WebSocket and stream
-    the LLM response token by token.
+    Send a message through the existing persistent
+    WebSocket connection and stream the LLM response.
 
     Expected events:
 
@@ -386,75 +475,90 @@ def stream_response(message: str, history: list):
 
     try:
 
-        with connect(
-            WEBSOCKET_URL,
-            open_timeout=15,
-            close_timeout=5,
-            max_size=10 * 1024 * 1024,
-        ) as websocket:
+        websocket = st.session_state.websocket
 
-            # Send user request
-            websocket.send(json.dumps(payload))
+        if websocket is None:
 
-            while True:
+            raise RuntimeError(
+                "WebSocket is not connected."
+            )
 
-                raw_message = websocket.recv()
+        # Send request through existing connection
+        websocket.send(
+            json.dumps(payload)
+        )
 
-                event = json.loads(raw_message)
+        while True:
 
-                event_type = event.get("type")
+            raw_message = websocket.recv()
 
-                # SOURCES
-                if event_type == "sources":
+            event = json.loads(raw_message)
 
-                    received_sources.extend(
-                        event.get("sources", [])
+            event_type = event.get("type")
+
+            # SOURCES
+            if event_type == "sources":
+
+                received_sources.extend(
+                    event.get("sources", [])
+                )
+
+            # STREAMING TOKENS
+            elif event_type == "token":
+
+                token = event.get("content", "")
+
+                if token:
+                    yield token
+
+            # COMPLETED
+            elif event_type == "done":
+
+                break
+
+            # ERROR
+            elif event_type == "error":
+
+                raise RuntimeError(
+                    event.get(
+                        "message",
+                        "Unable to generate response."
                     )
+                )
 
-                # STREAMING TOKENS
-                elif event_type == "token":
+            else:
 
-                    token = event.get("content", "")
-
-                    if token:
-                        yield token
-
-                # COMPLETED
-                elif event_type == "done":
-
-                    break
-
-                # ERROR
-                elif event_type == "error":
-
-                    raise RuntimeError(
-                        event.get(
-                            "message",
-                            "Unable to generate response."
-                        )
-                    )
-
-                else:
-
-                    logger.warning(
-                        "Unknown WebSocket event: %s",
-                        event_type,
-                    )
+                logger.warning(
+                    "Unknown WebSocket event: %s",
+                    event_type,
+                )
 
     except WebSocketException as exc:
 
         logger.exception(
-            "WebSocket connection failed"
+            "WebSocket connection lost."
         )
 
+        st.session_state.is_websocket_connected = False
+
+        try:
+
+            if st.session_state.websocket:
+                st.session_state.websocket.close()
+
+        except Exception:
+            pass
+
+        st.session_state.websocket = None
+
         raise RuntimeError(
-            "Unable to connect to the chatbot server."
+            "Connection to chatbot server was lost."
         ) from exc
 
     except json.JSONDecodeError as exc:
 
         logger.exception(
-            "Invalid JSON received from backend"
+            "Invalid JSON received from backend."
         )
 
         raise RuntimeError(
@@ -524,7 +628,10 @@ for chat in st.session_state.chat_history:
 
 user_input = st.chat_input(
     "Ask me anything about DarGlobal...",
-    disabled=st.session_state.is_generating,
+    disabled=(
+        not st.session_state.is_websocket_connected
+        or st.session_state.is_generating
+    )
 )
 
 
