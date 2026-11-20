@@ -1,0 +1,18 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+playwright = "*"
+pandas = "*"
+pydantic = "*"
+httpx = "*"
+python-dotenv = "*"
+beautifulsoup4 = "*"
+openai = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.12"

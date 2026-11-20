@@ -1,0 +1,6 @@
+playwright
+pandas
+pydantic
+httpx
+python-dotenv
+beautifulsoup4
