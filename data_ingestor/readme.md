@@ -1,3 +1,1 @@
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6MjY4OWVmNmItMjhjNC00YmU0LWFjNTQtYjE2NDRhZWNmOWVlIn0.tW_QyfGnPZ4Vyqp3OQoqRlFlaNVV0_XjMFJVERWRbE0
 
-https://7380b70f-39cc-4f5e-8ff4-e949f1924510.europe-west6-0.gcp.cloud.qdrant.io
